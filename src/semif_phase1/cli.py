@@ -16,8 +16,9 @@ from .shared import score_shared
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--mode", choices=("direct", "serial", "shared", "reranker"), required=True)
-    parser.add_argument("--backend", choices=("anthropic", "torch", "mlx", "llamacpp"), default="anthropic",
-                        help="anthropic (default) asks Claude Opus 5.5 via the local fcc proxy; others score local weights")
+    parser.add_argument("--backend", choices=("anthropic", "torch", "mlx", "llamacpp"),
+                        help="default: anthropic (Claude Opus 5.5 via local fcc) unless --model/--revision "
+                             "pin local weights, then torch")
     parser.add_argument("--mlx-bits", type=int, choices=(4, 8), help="Quantize MLX weights in memory; default preserves source precision")
     parser.add_argument("--mlx-cache-limit-mib", type=int,
                         help="MLX inactive allocation cache in MiB (default: 256; 0 disables caching)")
@@ -34,6 +35,8 @@ def main() -> None:
     parser.add_argument("--dtype", choices=("bfloat16", "float16", "float32"), default="bfloat16",
                         help="Model precision; changing it can change option scores")
     args = parser.parse_args()
+    if args.backend is None:
+        args.backend = "torch" if args.model or args.revision else "anthropic"
     if args.output.exists() or args.max_tokens < 1:
         parser.error("Output must be new and max-tokens must be positive")
     if args.backend == "anthropic" and args.mode != "direct":

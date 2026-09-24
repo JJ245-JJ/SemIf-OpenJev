@@ -65,7 +65,7 @@ def run_cli(tmp_path, monkeypatch):
         monkeypatch.setattr(sys, "argv", [
             "semif-score", "--mode", mode, "--model", "test/model",
             "--revision", "a" * 40, "--input", str(source), "--output", str(output),
-            "--max-tokens", "128", "--backend", "torch", *flags,
+            "--max-tokens", "128", *flags,
         ])
         cli.main()
 
