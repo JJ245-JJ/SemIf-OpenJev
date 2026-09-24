@@ -65,7 +65,7 @@ def run_cli(tmp_path, monkeypatch):
         monkeypatch.setattr(sys, "argv", [
             "semif-score", "--mode", mode, "--model", "test/model",
             "--revision", "a" * 40, "--input", str(source), "--output", str(output),
-            "--max-tokens", "128", *flags,
+            "--max-tokens", "128", "--backend", "torch", *flags,
         ])
         cli.main()
 
@@ -161,3 +161,29 @@ def test_existing_output_is_not_overwritten(run_cli, backends, capsys):
     assert run_cli.output.read_bytes() == original
     backends.torch.load_causal_model.assert_not_called()
     backends.mlx.load_model.assert_not_called()
+
+
+def test_anthropic_is_default_and_returns_chosen_option(tmp_path, monkeypatch):
+    from semif_phase1 import anthropic_backend
+    seen = {}
+    def fake_ask(model, messages):
+        seen["model"] = model
+        return "B"
+    monkeypatch.setattr(anthropic_backend, "_ask", fake_ask)
+    source, output = tmp_path / "in.jsonl", tmp_path / "out.jsonl"
+    source.write_text(json.dumps({"id": "r", "state": "s", "question": "q?",
+                                 "options": [{"id": "yes", "description": "Y"}, {"id": "no", "description": "N"}]}) + "\n")
+    monkeypatch.setattr(sys, "argv", ["semif-score", "--mode", "direct", "--input", str(source), "--output", str(output)])
+    main()
+    row = json.loads(output.read_text())
+    assert seen["model"] == "claude-opus-5-5"
+    assert row["option_ids"][row["probabilities"].index(1.0)] == "no"
+    assert row["model"]["backend"] == "anthropic" and row["option_logits"] is None
+
+
+def test_local_backend_still_requires_pinned_revision(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", ["semif-score", "--mode", "direct", "--backend", "mlx", "--model", "x",
+                                    "--input", "missing.jsonl", "--output", str(tmp_path / "o.jsonl")])
+    with pytest.raises(SystemExit):
+        main()
+    assert "requires --model and --revision" in capsys.readouterr().err

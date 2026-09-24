@@ -16,15 +16,16 @@ from .shared import score_shared
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--mode", choices=("direct", "serial", "shared", "reranker"), required=True)
-    parser.add_argument("--backend", choices=("torch", "mlx", "llamacpp"), default="torch")
+    parser.add_argument("--backend", choices=("anthropic", "torch", "mlx", "llamacpp"), default="anthropic",
+                        help="anthropic (default) asks Claude Opus 5.5 via the local fcc proxy; others score local weights")
     parser.add_argument("--mlx-bits", type=int, choices=(4, 8), help="Quantize MLX weights in memory; default preserves source precision")
     parser.add_argument("--mlx-cache-limit-mib", type=int,
                         help="MLX inactive allocation cache in MiB (default: 256; 0 disables caching)")
     parser.add_argument("--gguf", type=Path, help="Local GGUF checkpoint for --backend llamacpp")
     parser.add_argument("--llama-threads", type=int,
                         help="CPU threads for --backend llamacpp (default: all visible cores)")
-    parser.add_argument("--model", required=True)
-    parser.add_argument("--revision", required=True)
+    parser.add_argument("--model", help="Model id (default for anthropic: claude-opus-5-5)")
+    parser.add_argument("--revision", help="Pinned source revision; required for local backends")
     parser.add_argument("--input", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--max-tokens", type=int, default=4096)
@@ -35,6 +36,10 @@ def main() -> None:
     args = parser.parse_args()
     if args.output.exists() or args.max_tokens < 1:
         parser.error("Output must be new and max-tokens must be positive")
+    if args.backend == "anthropic" and args.mode != "direct":
+        parser.error("anthropic backend supports direct mode only")
+    if args.backend != "anthropic" and not (args.model and args.revision):
+        parser.error(f"--backend {args.backend} requires --model and --revision")
     if args.mlx_bits and args.backend != "mlx":
         parser.error("--mlx-bits requires --backend mlx")
     if args.mlx_cache_limit_mib is not None:
@@ -62,7 +67,12 @@ def main() -> None:
     for row in rows:
         validate_row(row)
     direct, serial, shared = direct_score, SerialPrefixScorer, score_shared
-    if args.backend == "mlx":
+    if args.backend == "anthropic":
+        from . import anthropic_backend
+
+        model, tokenizer, metadata = anthropic_backend.load_model(args.model)
+        direct = anthropic_backend.score
+    elif args.backend == "mlx":
         from . import mlx_backend
 
         cache_limit_mib = (mlx_backend.DEFAULT_CACHE_LIMIT_MIB if args.mlx_cache_limit_mib is None
